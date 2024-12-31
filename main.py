@@ -1,7 +1,5 @@
 import asyncio
 import json
-from dataclasses import dataclass
-from datetime import datetime
 from pprint import pprint
 
 from solana.rpc.async_api import AsyncClient
@@ -10,19 +8,10 @@ from solders.rpc.config import RpcTransactionConfig
 from solders.rpc.requests import GetTransaction
 from solders.transaction_status import UiTransactionEncoding
 
-from transaction_parser import parse_full_deltas
-
-
-@dataclass
-class TransactionData:
-    slot: int
-    txn_hash: str
-    token_mint_address: str
-    user_address: str
-    sol_amount: int
-    token_amount: int
-    is_buy: bool
-    timestamp: str
+from transaction_parser import (
+    parse_sol_and_token_deltas,
+    build_transaction_data,
+)
 
 
 async def fetch_transaction_history(mint_address: str):
@@ -38,7 +27,6 @@ async def fetch_transaction_history(mint_address: str):
         print(f"Found {len(signatures_response.value)} transactions for {mint_address}")
         transactions = []
 
-        # Limit to 2 transactions for this example
         for signature_info in signatures_response.value:
             signature = signature_info.signature
 
@@ -46,10 +34,10 @@ async def fetch_transaction_history(mint_address: str):
                 signature,
                 RpcTransactionConfig(
                     encoding=UiTransactionEncoding.JsonParsed,
-                    max_supported_transaction_version=0
+                    max_supported_transaction_version=0,
                 )
             )
-            # Using "raw" make_request_unparsed call
+
             response_str = await client._provider.make_request_unparsed(req)
             raw_json = json.loads(response_str)
 
@@ -58,70 +46,31 @@ async def fetch_transaction_history(mint_address: str):
                 continue
 
             result = raw_json["result"]
-            slot = result.get("slot", 0)
-            txn_hash = signature
-            block_time = result.get("blockTime", None)
-            timestamp = datetime.fromtimestamp(block_time).isoformat() + "Z" if block_time else None
 
-            tx_info = result.get("transaction", {})
-            meta_info = result.get("meta", {})
+            # 1. Build "simplified" TransactionData (old approach)
+            tx_data = build_transaction_data(result, mint_address)
+            if tx_data:
+                transactions.append(tx_data)
 
-            # ---------------------------
-            # Existing "simplified" calculation (as in your code):
-            pre_balances = meta_info.get("preBalances", [])
-            post_balances = meta_info.get("postBalances", [])
-            sol_amount = (pre_balances[0] - post_balances[0]) if pre_balances and post_balances else 0
+            # 2. Simultaneously calculate all SOL and token deltas
+            deltas = parse_sol_and_token_deltas(result)
 
-            token_amount = 0
-            pre_token_balances = meta_info.get("preTokenBalances", [])
-            post_token_balances = meta_info.get("postTokenBalances", [])
-            if pre_token_balances and post_token_balances:
-                pre_amount_str = pre_token_balances[0]["uiTokenAmount"]["amount"]
-                post_amount_str = post_token_balances[0]["uiTokenAmount"]["amount"]
-                token_amount = int(post_amount_str) - int(pre_amount_str)
+            print("=== TX Signature:", signature, "===")
+            print("Slot:", result.get("slot"), "BlockTime:", result.get("blockTime"))
+            print("Simplified TransactionData:")
+            pprint(tx_data)
 
-            message_dict = tx_info.get("message", {})
-            account_keys = message_dict.get("accountKeys", [])
-            user_address = account_keys[0]["pubkey"] if account_keys else "Unknown"
+            print("\nSOL deltas (lamports):")
+            pprint(deltas.deltas_sol)
+            print("\nToken deltas ( (owner, mint) -> amount ):")
+            pprint(deltas.deltas_tokens)
+            print("========================================\n")
 
-            is_buy = token_amount > 0
+            # Delay to avoid 429
+            await asyncio.sleep(5)
 
-            # Create a simple "TransactionData" (your format)
-            transactions.append(TransactionData(
-                slot=slot,
-                txn_hash=str(txn_hash),
-                token_mint_address=mint_address,
-                user_address=user_address,
-                sol_amount=sol_amount,
-                token_amount=token_amount,
-                is_buy=is_buy,
-                timestamp=timestamp,
-            ))
-            # ---------------------------
-
-            # ---------------------------
-            # Add "Full" calculation for debugging/review
-            sol_deltas, token_deltas = parse_full_deltas(result)
-            print("\n=== Full Deltas for transaction", signature, "===")
-            if sol_deltas:
-                print("SOL Changes (lamports):")
-                for d in sol_deltas:
-                    print(f"  {d.pubkey}: {d.delta_lamports}")
-            else:
-                print("No SOL changes")
-
-            if token_deltas:
-                print("SPL Token Changes:")
-                for t in token_deltas:
-                    print(f"  owner={t.owner} mint={t.mint} delta={t.delta_amount}")
-            else:
-                print("No SPL token changes")
-            # ---------------------------
-
-            await asyncio.sleep(0.5)
-
-        # Output "simplified" results
-        print("\nFinal collected simplified transactions:")
+        # After the loop, you can summarize your transactions
+        print("======== Final transactions list ========")
         for tx in transactions:
             pprint(tx)
 
