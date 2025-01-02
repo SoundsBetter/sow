@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Tuple, Optional
+from typing import Optional
 
 
 @dataclass
@@ -22,8 +22,8 @@ class TransactionDeltas:
       - deltas_sol: { pubkey: delta_lamports }
       - deltas_tokens: { (owner, mint): delta_amount }
     """
-    deltas_sol: Dict[str, int]
-    deltas_tokens: Dict[Tuple[str, str], int]
+    deltas_sol: dict[str, int]
+    deltas_tokens: dict[tuple[str, str], int]
 
 
 def parse_sol_and_token_deltas(raw_result: dict) -> TransactionDeltas:
@@ -42,7 +42,7 @@ def parse_sol_and_token_deltas(raw_result: dict) -> TransactionDeltas:
     account_keys_info = message.get("accountKeys", [])
     all_keys = [info["pubkey"] for info in account_keys_info]
 
-    deltas_sol: Dict[str, int] = {}
+    deltas_sol: dict[str, int] = {}
     for i in range(len(pre_balances)):
         if i < len(all_keys):
             pubkey = all_keys[i]
@@ -71,7 +71,7 @@ def parse_sol_and_token_deltas(raw_result: dict) -> TransactionDeltas:
         post_map[(owner, mint)] = int(float(amount_str))
 
     all_token_keys = set(pre_map.keys()) | set(post_map.keys())
-    deltas_tokens: Dict[Tuple[str, str], int] = {}
+    deltas_tokens: dict[tuple[str, str], int] = {}
     for k in all_token_keys:
         pre_amount = pre_map.get(k, 0)
         post_amount = post_map.get(k, 0)
