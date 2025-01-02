@@ -1,21 +1,26 @@
 import asyncio
 import json
-from pprint import pprint
-from datetime import datetime
-from typing import List
-
-import requests
-from solana.rpc.async_api import AsyncClient
-from solders.pubkey import Pubkey
-from solders.rpc.config import RpcTransactionConfig
-from solders.rpc.requests import GetTransaction
-from solders.signature import Signature
-from solders.transaction_status import UiTransactionEncoding
 from dataclasses import dataclass
+from datetime import datetime
+from typing import List, Optional
 
+from helius import TransactionsAPI
 
 @dataclass
 class SwapEvent:
+    """
+    Represents a single swap event for a specific SPL token.
+
+    Attributes:
+        slot: The block number (slot).
+        txn_hash: The transaction signature (hash).
+        token_mint_address: The mint address of the SPL token.
+        user_address: The account address that changed token balance.
+        sol_amount: The SOL amount (in lamports) changed in this account.
+        token_amount: The raw integer token amount changed in this account (with decimals considered).
+        is_buy: Indicates whether the account received (+) or sent (-) token_amount.
+        timestamp: ISO8601 string of the transaction's block time.
+    """
     slot: int
     txn_hash: str
     token_mint_address: str
@@ -25,61 +30,90 @@ class SwapEvent:
     is_buy: bool
     timestamp: str
 
-def parse_with_helius_enriched(signatures: List[str], api_key: str) -> List[dict]:
+
+async def fetch_token_swaps(
+    mint_address: str,
+    api_key: str,
+    bonding_curve_address: Optional[str] = None
+) -> List[SwapEvent]:
     """
-    Звертається до ендпоінту:
-      POST https://api.helius.xyz/v0/transactions?api-key=<API_KEY>
-    з body:
-      {"transactions": [ ...signatures... ]}
-    і повертає список розпарсених об'єктів (один на кожну сигнатуру).
+    Fetches and parses token swaps for a specific SPL token using Helius parsed transaction history.
+    Each accountData entry with a tokenBalanceChanges that matches the given mint_address
+    generates a SwapEvent.
+
+    Args:
+        mint_address: The target SPL token mint address.
+        api_key: The Helius API key.
+        bonding_curve_address: An optional bonding curve program address (not used in filtering).
+
+    Returns:
+        A list of SwapEvent objects representing each balance change of the token mint_address.
     """
-    url = f"https://api.helius.xyz/v0/transactions?api-key={api_key}"
-    payload = {
-        "transactions": signatures[:100]
-    }
-    headers = {
-        "Content-Type": "application/json"
-    }
-    resp = requests.post(url, headers=headers, data=json.dumps(payload))
-    if resp.status_code == 200:
-        return resp.json()  # list of enriched transactions
-    else:
-        print("Helius Enhanced API Error:", resp.status_code, resp.text)
+    tx_api = TransactionsAPI(api_key)
+    transaction_history = tx_api.get_parsed_transaction_history(address=mint_address)
+    if not transaction_history:
         return []
 
+    results: List[SwapEvent] = []
+    for tx in transaction_history:
+        signature = tx.get("signature", "")
+        slot = tx.get("slot", 0)
+        ts_unix = tx.get("timestamp", 0)
+        dt_str = ""
+        if ts_unix:
+            dt_str = datetime.fromtimestamp(ts_unix).isoformat() + "Z"
 
-async def fetch_all_swaps_for_token(mint_address: str, limit: int = 5):
-    """
-    1) Отримуємо (limit) останніх сигнатур для mint_address (через звичайний Solana RPC).
-    2) Викликаємо parse_all_swap_events_for_signature() для кожної сигнатури,
-       щоб побачити "власну" логіку pre-/postBalances.
-    3) Потім викликаємо parse_with_helius_enriched() і порівнюємо/виводимо дані Helius.
-    """
-    rpc_url = "https://api.mainnet-beta.solana.com"
-    async with AsyncClient(rpc_url) as client:
-        public_key = Pubkey.from_string(mint_address)
+        if bonding_curve_address:
+            account_data_list = tx.get("accountData", [])
+            all_accounts = [d.get("account", "") for d in account_data_list]
+            if bonding_curve_address not in all_accounts:
+                continue
 
-        signatures_response = await client.get_signatures_for_address(public_key)
-        if not signatures_response.value:
-            print(f"No transaction history found for {mint_address}")
-            return
+        account_data_list = tx.get("accountData", [])
+        for acc_data in account_data_list:
+            user_addr = acc_data.get("account", "")
+            native_change = acc_data.get("nativeBalanceChange", 0)
+            token_changes = acc_data.get("tokenBalanceChanges", [])
 
-        sigs = [str(info.signature) for info in signatures_response.value]
+            for tchange in token_changes:
+                mint = tchange.get("mint", "")
+                if mint != mint_address:
+                    continue
+                raw_info = tchange.get("rawTokenAmount", {})
+                raw_token_str = raw_info.get("tokenAmount", "0")
+                try:
+                    raw_token_int = int(raw_token_str)
+                except ValueError:
+                    raw_token_int = 0
+                is_buy = (raw_token_int > 0)
 
-        api_key = "a5b5b179-92f9-42bc-8910-6cfb0f595d61"
-        helius_data = parse_with_helius_enriched(sigs, api_key=api_key)
-
-        print("\n=== Helius Enriched Data ===")
-        for enriched_tx in helius_data:
-            # enriched_tx - це dict з полями "signature", "type", "tokenTransfers", "nativeTransfers" тощо.
-            sig = enriched_tx.get("signature", "")
-            print(f"Signature: {sig}, Type: {enriched_tx.get('type')}, Source: {enriched_tx.get('source')}")
-
+                event = SwapEvent(
+                    slot=slot,
+                    txn_hash=signature,
+                    token_mint_address=mint_address,
+                    user_address=user_addr,
+                    sol_amount=native_change,
+                    token_amount=raw_token_int,
+                    is_buy=is_buy,
+                    timestamp=dt_str
+                )
+                results.append(event)
+    return results
 
 
 async def main():
-    mint_address = "KbCZjfexzrExJr7DmTcg8rqKCqrc5cxTPVvopoKJGwg"
-    await fetch_all_swaps_for_token(mint_address, limit=2)
+    helius_api_key = "a5b5b179-92f9-42bc-8910-6cfb0f595d61"
+    target_mint = "KbCZjfexzrExJr7DmTcg8rqKCqrc5cxTPVvopoKJGwg"
+    bonding_curve_addr = None
+    events = await fetch_token_swaps(
+        mint_address=target_mint,
+        api_key=helius_api_key,
+        bonding_curve_address=bonding_curve_addr
+    )
+    for ev in events:
+        print(json.dumps(ev.__dict__, indent=2))
+
+    print(f'Find {len(events)} swaps')
 
 
 if __name__ == "__main__":
