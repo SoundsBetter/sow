@@ -5,6 +5,9 @@ from datetime import datetime
 from typing import List, Optional
 
 from helius import TransactionsAPI
+from solana.rpc.async_api import AsyncClient
+from solders.pubkey import Pubkey
+
 
 @dataclass
 class SwapEvent:
@@ -31,6 +34,33 @@ class SwapEvent:
     timestamp: str
 
 
+def chunked_iterable(iterable: List[str], chunk_size: int = 100) -> List[List[str]]:
+    """
+    Splits a list into chunks of specified size.
+
+    Args:
+        iterable: The list to split.
+        chunk_size: The size of each chunk.
+
+    Returns:
+        A list of chunks.
+    """
+    return [iterable[i:i + chunk_size] for i in range(0, len(iterable), chunk_size)]
+
+
+async def fetch_transaction_history(mint_address: str):
+    rpc_url = "https://api.mainnet-beta.solana.com"
+    async with AsyncClient(rpc_url) as client:
+        public_key = Pubkey.from_string(mint_address)
+
+        signatures_response = await client.get_signatures_for_address(public_key)
+        if not signatures_response.value:
+            print(f"No transaction history found for {mint_address}")
+            return
+
+        return [r.signature for r in signatures_response.value]
+
+
 async def fetch_token_swaps(
     mint_address: str,
     api_key: str,
@@ -49,8 +79,13 @@ async def fetch_token_swaps(
     Returns:
         A list of SwapEvent objects representing each balance change of the token mint_address.
     """
+    signatures = await fetch_transaction_history(mint_address)
     tx_api = TransactionsAPI(api_key)
-    transaction_history = tx_api.get_parsed_transaction_history(address=mint_address)
+    signature_chunks = chunked_iterable([str(s) for s in signatures])
+    transaction_history = []
+    for chunk in signature_chunks:
+        transaction_history.extend(tx_api.get_parsed_transactions(transactions=[str(s) for s in chunk]))
+
     if not transaction_history:
         return []
 
