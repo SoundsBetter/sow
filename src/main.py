@@ -11,12 +11,13 @@ from src.utils import chunked_iterable
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 async def main():
     solana_api = SolanaAPI(settings.RPC_URL)
     helius_api = HeliusAPI(settings.HELIUS_API_KEY)
 
     fetcher = TransactionFetcher(solana_api, settings.TARGET_MINT)
-    parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPE, settings.HELIUS_MAX_TASKS)
+    parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPES, settings.HELIUS_MAX_TASKS)
 
     signatures = await fetcher.fetch_transactions()
 
