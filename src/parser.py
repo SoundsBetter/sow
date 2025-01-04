@@ -1,9 +1,11 @@
+import asyncio
+import logging
+
+from datetime import datetime, timezone
+
 from .api import HeliusAPI
 from .models import SwapEvent
 from .utils import find_native_balance_change
-from datetime import datetime
-import logging
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ class TransactionParser:
         for parsed_transactions in results:
             filtered = [
                 tx for tx in parsed_transactions
-                if tx['source'] == self.tx_source and tx['type'] == self.tx_type and tx['tokenTransfers']
+                if tx.get('source') == self.tx_source and tx.get('type') == self.tx_type and tx.get('tokenTransfers')
             ]
             parsed_txs.extend(filtered)
         return parsed_txs
@@ -48,7 +50,7 @@ class TransactionParser:
             find_native_balance_change(account_data, from_user_account)
             if is_buy else find_native_balance_change(account_data, to_user_account)
         )
-        timestamp = datetime.fromtimestamp(tx['timestamp']).isoformat() + "Z"
+        timestamp = datetime.fromtimestamp(tx['timestamp'], tz=timezone.utc).isoformat() + "Z"
         return SwapEvent(
             slot=tx['slot'],
             txn_hash=tx['signature'],

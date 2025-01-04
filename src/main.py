@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+
 from src.settings import settings
 from src.api import SolanaAPI, HeliusAPI
 from src.fetcher import TransactionFetcher
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 async def main():
     solana_api = SolanaAPI(settings.RPC_URL)
-    helius_api = HeliusAPI(settings.API_KEY)
+    helius_api = HeliusAPI(settings.HELIUS_API_KEY)
 
     fetcher = TransactionFetcher(solana_api, settings.TARGET_MINT)
     parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPE)

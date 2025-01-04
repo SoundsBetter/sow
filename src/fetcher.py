@@ -1,7 +1,9 @@
 import asyncio
-from .api import SolanaAPI
-from solders.transaction_status import TransactionConfirmationStatus
 import logging
+
+from solders.transaction_status import TransactionConfirmationStatus
+
+from .api import SolanaAPI
 
 logger = logging.getLogger(__name__)
 
@@ -31,5 +33,5 @@ class TransactionFetcher:
             )
             await asyncio.sleep(5)  # TODO: remove after brake limits
         if not results:
-            logger.error(f'No transactions found for: {self.target_mint}')
+            logger.warning(f'No transactions found for: {self.target_mint}')
         return results
