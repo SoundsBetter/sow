@@ -10,10 +10,11 @@ from .utils import find_native_balance_change
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, tx_source: str, tx_type: str):
+    def __init__(self, helius_api: HeliusAPI, tx_source: str, tx_type: str, max_concurrent_tasks: int):
         self.helius_api = helius_api
         self.tx_source = tx_source
         self.tx_type = tx_type
+        self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
     async def parse_transactions(self, chunks: list[list[str]]) -> list[dict]:
         parsed_txs = []
@@ -31,11 +32,12 @@ class TransactionParser:
         return parsed_txs
 
     async def get_parsed_transactions_async(self, chunk: list[str]) -> list[dict]:
-        try:
-            return await asyncio.to_thread(self.helius_api.get_parsed_transactions, chunk)
-        except Exception as e:
-            logger.error(f'Error parsing transactions: {e}')
-            return []
+        async with self.semaphore:
+            try:
+                return await asyncio.to_thread(self.helius_api.get_parsed_transactions, chunk)
+            except Exception as e:
+                logger.error(f'Error parsing transactions: {e}')
+                return []
 
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
         return [self.create_swap_event(tx) for tx in transactions]

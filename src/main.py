@@ -16,7 +16,7 @@ async def main():
     helius_api = HeliusAPI(settings.HELIUS_API_KEY)
 
     fetcher = TransactionFetcher(solana_api, settings.TARGET_MINT)
-    parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPE)
+    parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPE, settings.HELIUS_MAX_TASKS)
 
     signatures = await fetcher.fetch_transactions()
 
