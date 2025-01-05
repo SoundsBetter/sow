@@ -10,9 +10,9 @@ from .utils import find_native_balance_change
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, tx_source: str, tx_types: str, max_concurrent_tasks: int):
+    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], tx_types: str, max_concurrent_tasks: int):
         self.helius_api = helius_api
-        self.tx_source = tx_source
+        self.tx_sources = tx_sources
         self.tx_types = tx_types
         self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
@@ -26,7 +26,7 @@ class TransactionParser:
         for parsed_transactions in results:
             filtered = [
                 tx for tx in parsed_transactions
-                if tx.get('source') == self.tx_source and tx.get('type') in self.tx_types and tx.get('tokenTransfers')
+                if tx.get('source') in self.tx_sources and tx.get('type') in self.tx_types and tx.get('tokenTransfers')
             ]
             parsed_txs.extend(filtered)
         return parsed_txs

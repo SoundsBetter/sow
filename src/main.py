@@ -17,7 +17,7 @@ async def main():
     helius_api = HeliusAPI(settings.HELIUS_API_KEY)
 
     fetcher = TransactionFetcher(solana_api, settings.TARGET_MINT)
-    parser = TransactionParser(helius_api, settings.TX_SOURCE, settings.TX_TYPES, settings.HELIUS_MAX_TASKS)
+    parser = TransactionParser(helius_api, settings.TX_SOURCES, settings.TX_TYPES, settings.HELIUS_MAX_TASKS)
 
     signatures = await fetcher.fetch_transactions()
 
@@ -26,6 +26,7 @@ async def main():
 
     for event in swap_events:
         logger.info(json.dumps(event.__dict__, indent=2))
+    logger.info(f'Count of swaps: {len(swap_events)}')
 
     await solana_api.close()
 
