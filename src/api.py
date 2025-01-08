@@ -1,5 +1,7 @@
+import asyncio
 import logging
 
+import httpx
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 from helius import TransactionsAPI
@@ -20,7 +22,17 @@ class SolanaAPI:
 
 class HeliusAPI:
     def __init__(self, api_key: str):
-        self.api = TransactionsAPI(api_key)
+        self.api_key = api_key
 
-    def get_parsed_transactions(self, chunk):
-        return self.api.get_parsed_transactions(chunk)
+    async def get_parsed_transactions(self, chunk):
+        payload = {
+            "transactions": chunk
+        }
+        async with httpx.AsyncClient() as client:
+            while True:
+                res = await client.post(f"https://api.helius.xyz/v0/transactions?api-key={self.api_key}", json=payload)
+                if res.status_code != 200:
+                    logger.error(f'Error while parsing transactions: {res.status_code}: {res.text}')
+                    await asyncio.sleep(3)
+                    continue
+                return res.json()

@@ -5,24 +5,23 @@ from datetime import datetime, timezone
 
 from .api import HeliusAPI
 from .models import SwapEvent
-from .utils import find_native_balance_change
+from .utils import find_native_balance_change, write_data_to_json_file
 
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], tx_types: str, max_concurrent_tasks: int):
+    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], tx_types: list[str]):
         self.helius_api = helius_api
         self.tx_sources = tx_sources
         self.tx_types = tx_types
-        self.semaphore = asyncio.Semaphore(max_concurrent_tasks)
 
     async def parse_transactions(self, chunks: list[list[str]]) -> list[dict]:
         parsed_txs = []
-        tasks = [
-            asyncio.create_task(self.get_parsed_transactions_async(chunk))
+        results = [
+            await self.helius_api.get_parsed_transactions(chunk)
             for chunk in chunks
         ]
-        results = await asyncio.gather(*tasks)
+        # write_data_to_json_file(results)
         for parsed_transactions in results:
             filtered = [
                 tx for tx in parsed_transactions
