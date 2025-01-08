@@ -30,7 +30,12 @@ class HeliusAPI:
         }
         async with httpx.AsyncClient() as client:
             while True:
-                res = await client.post(f"https://api.helius.xyz/v0/transactions?api-key={self.api_key}", json=payload)
+                try:
+                    res = await client.post(f"https://api.helius.xyz/v0/transactions?api-key={self.api_key}", json=payload)
+                except Exception as e:
+                    logger.error(f'Error while parsing transactions: {e}')
+                    await asyncio.sleep(3)
+                    continue
                 if res.status_code != 200:
                     logger.error(f'Error while parsing transactions: {res.status_code}: {res.text}')
                     await asyncio.sleep(3)
