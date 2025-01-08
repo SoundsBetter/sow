@@ -10,10 +10,11 @@ from .utils import find_native_balance_change, write_data_to_json_file
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, program_id: str, mint: str):
+    def __init__(self, helius_api: HeliusAPI, program_id: str, mint: str, min_sol_amount: float):
         self.helius_api = helius_api
         self.mint = mint
         self.pump_fun_program_id = program_id
+        self.min_sol_amount = min_sol_amount
 
     async def parse_transactions(self, chunks: list[list[str]]) -> list[dict]:
         parsed_txs = []
@@ -30,7 +31,7 @@ class TransactionParser:
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
         return [
             swap for tx in transactions
-            if (swap := self.create_swap_event(tx)) and swap.sol_amount and swap.sol_amount > 0.01
+            if (swap := self.create_swap_event(tx)) and swap.sol_amount and swap.sol_amount > self.min_sol_amount
         ]
 
     def validate_tx(self, tx: dict) -> bool:
