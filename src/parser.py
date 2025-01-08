@@ -1,6 +1,7 @@
 import logging
 
 from datetime import datetime, timezone
+from typing import Optional
 
 from .api import HeliusAPI
 from .models import SwapEvent
@@ -9,10 +10,10 @@ from .utils import find_native_balance_change, write_data_to_json_file
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], mint: str):
+    def __init__(self, helius_api: HeliusAPI, program_id: str, mint: str):
         self.helius_api = helius_api
-        self.tx_sources = tx_sources
         self.mint = mint
+        self.pump_fun_program_id = program_id
 
     async def parse_transactions(self, chunks: list[list[str]]) -> list[dict]:
         parsed_txs = []
@@ -24,20 +25,33 @@ class TransactionParser:
         for parsed_transactions in results:
             filtered = [
                 tx for tx in parsed_transactions
-                if tx.get("source") in self.tx_sources
-                   and tx.get("tokenTransfers")
-                   and not tx.get("transactionError")
+                if not tx.get("transactionError") and self.is_pumpfun_swap(tx)
             ]
             parsed_txs.extend(filtered)
         return parsed_txs
 
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
-        return [swap for tx in transactions if (swap := self.create_swap_event(tx)).sol_amount and swap.sol_amount >= 0.01]
+        return [
+            swap for tx in transactions
+            if (swap := self.create_swap_event(tx)) and swap.sol_amount and swap.sol_amount >= 0.01
+        ]
 
-    def create_swap_event(self, tx: dict) -> SwapEvent:
+    def is_pumpfun_swap(self, tx: dict) -> bool:
+        for instruction in tx.get("instructions", []):
+            if instruction.get("programId") == self.pump_fun_program_id:
+                return True
+            for inner in instruction.get("innerInstructions", []):
+                if inner.get("programId") == self.pump_fun_program_id:
+                    return True
+        return False
+
+    def create_swap_event(self, tx: dict) -> Optional[SwapEvent]:
         fee_payer = tx['feePayer']
         account_data = tx['accountData']
-        token_transfer = [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint][0]
+        token_transfer = [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint]
+        if not token_transfer:
+            return
+        token_transfer = token_transfer[0]
         from_user_account = token_transfer['fromUserAccount']
         to_user_account = token_transfer['toUserAccount']
         is_buy = fee_payer == to_user_account
