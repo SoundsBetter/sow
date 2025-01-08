@@ -1,4 +1,3 @@
-import asyncio
 import logging
 
 from datetime import datetime, timezone
@@ -10,10 +9,10 @@ from .utils import find_native_balance_change, write_data_to_json_file
 logger = logging.getLogger(__name__)
 
 class TransactionParser:
-    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], tx_types: list[str]):
+    def __init__(self, helius_api: HeliusAPI, tx_sources: list[str], mint: str):
         self.helius_api = helius_api
         self.tx_sources = tx_sources
-        self.tx_types = tx_types
+        self.mint = mint
 
     async def parse_transactions(self, chunks: list[list[str]]) -> list[dict]:
         parsed_txs = []
@@ -21,31 +20,26 @@ class TransactionParser:
             await self.helius_api.get_parsed_transactions(chunk)
             for chunk in chunks
         ]
-        # write_data_to_json_file(results)
+        write_data_to_json_file(results)
         for parsed_transactions in results:
             filtered = [
                 tx for tx in parsed_transactions
-                if tx.get('source') in self.tx_sources and tx.get('type') in self.tx_types and tx.get('tokenTransfers')
+                if tx.get("source") in self.tx_sources
+                   and tx.get("tokenTransfers")
+                   and not tx.get("transactionError")
             ]
             parsed_txs.extend(filtered)
         return parsed_txs
 
-    async def get_parsed_transactions_async(self, chunk: list[str]) -> list[dict]:
-        async with self.semaphore:
-            try:
-                return await asyncio.to_thread(self.helius_api.get_parsed_transactions, chunk)
-            except Exception as e:
-                logger.error(f'Error parsing transactions: {e}')
-                return []
-
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
-        return [self.create_swap_event(tx) for tx in transactions]
+        return [swap for tx in transactions if (swap := self.create_swap_event(tx)).sol_amount and swap.sol_amount >= 0.01]
 
     def create_swap_event(self, tx: dict) -> SwapEvent:
         fee_payer = tx['feePayer']
         account_data = tx['accountData']
-        from_user_account = tx['tokenTransfers'][0]['fromUserAccount']
-        to_user_account = tx['tokenTransfers'][0]['toUserAccount']
+        token_transfer = [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint][0]
+        from_user_account = token_transfer['fromUserAccount']
+        to_user_account = token_transfer['toUserAccount']
         is_buy = fee_payer == to_user_account
         sol_amount = (
             find_native_balance_change(account_data, from_user_account)
@@ -55,10 +49,10 @@ class TransactionParser:
         return SwapEvent(
             slot=tx['slot'],
             txn_hash=tx['signature'],
-            token_mint_address=tx['tokenTransfers'][0]['mint'],
+            token_mint_address=token_transfer['mint'],
             user_address=fee_payer,
             sol_amount=sol_amount,
-            token_amount=tx['tokenTransfers'][0]['tokenAmount'],
+            token_amount=token_transfer['tokenAmount'],
             is_buy=is_buy,
             timestamp=timestamp
         )
