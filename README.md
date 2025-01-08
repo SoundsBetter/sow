@@ -7,5 +7,3 @@ Solana Swap Event Collector is a Python-based tool designed to fetch, parse, and
 To start run `python -m src.main`
 
 To set mint address change `TARGET_MINT` in `settings`
-
-`HELIUS_MAX_TASKS` for limit requests to Helius API
