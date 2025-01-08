@@ -23,18 +23,24 @@ class TransactionParser:
         ]
         write_data_to_json_file(results)
         for parsed_transactions in results:
-            filtered = [
-                tx for tx in parsed_transactions
-                if not tx.get("transactionError") and self.is_pumpfun_swap(tx)
-            ]
+            filtered = [tx for tx in parsed_transactions if self.validate_tx(tx)]
             parsed_txs.extend(filtered)
         return parsed_txs
 
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
         return [
             swap for tx in transactions
-            if (swap := self.create_swap_event(tx)) and swap.sol_amount and swap.sol_amount >= 0.01
+            if (swap := self.create_swap_event(tx)) and swap.sol_amount and swap.sol_amount > 0.01
         ]
+
+    def validate_tx(self, tx: dict) -> bool:
+        if tx.get("transactionError"):
+            return False
+        if not self.is_pumpfun_swap(tx):
+            return False
+        if not [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint]:
+            return False
+        return True
 
     def is_pumpfun_swap(self, tx: dict) -> bool:
         for instruction in tx.get("instructions", []):
@@ -49,8 +55,6 @@ class TransactionParser:
         fee_payer = tx['feePayer']
         account_data = tx['accountData']
         token_transfer = [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint]
-        if not token_transfer:
-            return
         token_transfer = token_transfer[0]
         from_user_account = token_transfer['fromUserAccount']
         to_user_account = token_transfer['toUserAccount']
