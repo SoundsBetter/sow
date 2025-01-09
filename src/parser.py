@@ -39,7 +39,10 @@ class TransactionParser:
             return False
         if not self.is_pumpfun_swap(tx):
             return False
-        if not [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint]:
+        if not [
+            tt for tt in tx['tokenTransfers']
+            if tt.get('mint') == self.mint and tt.get('fromUserAccount') and tt.get('toUserAccount')
+        ]:
             return False
         return True
 
@@ -55,11 +58,13 @@ class TransactionParser:
     def create_swap_event(self, tx: dict) -> Optional[SwapEvent]:
         fee_payer = tx['feePayer']
         account_data = tx['accountData']
-        token_transfer = [tt for tt in tx['tokenTransfers'] if tt['mint'] == self.mint]
-        token_transfer = token_transfer[0]
+        token_transfer = [
+            tt for tt in tx['tokenTransfers']
+            if tt['mint'] == self.mint and tt['fromUserAccount'] and tt['toUserAccount']
+        ][0]
         from_user_account = token_transfer['fromUserAccount']
         to_user_account = token_transfer['toUserAccount']
-        is_buy = fee_payer == to_user_account
+        is_buy = fee_payer != from_user_account
         sol_amount = (
             find_native_balance_change(account_data, from_user_account)
             if is_buy else find_native_balance_change(account_data, to_user_account)
