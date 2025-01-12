@@ -11,7 +11,7 @@ from solders.rpc.responses import GetBlockResp
 from solders.signature import Signature
 from solders.transaction_status import TransactionConfirmationStatus, UiConfirmedBlock
 
-from src.utils import chunked_iterable
+from src.utils import chunked_iterable, write_data_to_json_file
 from src.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class SolanaAPI:
     def __init__(self, rpc_url: str):
         self.rpc_url = rpc_url
         self.client = AsyncClient(self.rpc_url)
-        self.delay_before_request = 1
+        self.delay_before_request = 2
 
     async def __aenter__(self):
         return self
@@ -65,7 +65,9 @@ class SolanaAPI:
     async def get_blok_by_timestamp(self, input_timestamp: int) -> GetBlockResp:
         try:
             cur_slot, cur_block_timestamp = await self.get_current_slot_timestamp()
-        except SolanaRpcException as e:
+        except Exception as e:
+            logger.warning(f'Error fetching current slot: {e}. Retrying in 1 second')
+            await asyncio.sleep(1)
             cur_slot, cur_block_timestamp = await self.get_current_slot_timestamp()
         while True:
             slot_delta = int((cur_block_timestamp - input_timestamp) // settings.SLOT_DURATION)
@@ -89,6 +91,8 @@ class SolanaAPI:
 class HeliusAPI:
     def __init__(self, api_key: str):
         self.api_key = api_key
+        self.transactions_endpoint = "https://mainnet.helius-rpc.com/?api-key={api_key}"
+        self.delay_before_request = 1
 
     async def get_transactions_for_chunk(self, chunk: list[str]):
         payload = {
@@ -108,18 +112,29 @@ class HeliusAPI:
                     continue
                 return res.json()
 
-    async def get_detail_transactions_for_mint(self, signatures: list[str], mint: str) -> list[dict]:
-        results = [
+    async def get_detail_transactions(self, signatures: list[str]) -> list[dict]:
+        return [
             await self.get_transactions_for_chunk(chunk)
             for chunk in chunked_iterable(signatures)
         ]
-        # write_data_to_json_file(results)  # IF YOU NEED STORE RAW DATA TO FILE
-        return [tx for parsed_transactions in results for tx in parsed_transactions if self.validate_tx(tx, mint)]
 
-    def validate_tx(self, tx: dict, mint: str) -> bool:
+    async def get_detail_transactions_created_token_pumpfun(self, signatures: list[str]) -> list[dict]:
+        results = await self.get_detail_transactions(signatures)
+        write_data_to_json_file(results, 'for_account.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        return [
+            tx for parsed_transactions in results
+            for tx in parsed_transactions if await self.validate_tx_via_program_id(tx, settings.TOKEN_CREATE_PROGRAM_ID)
+        ]
+
+    async def get_detail_transactions_for_mint(self, signatures: list[str], mint: str) -> list[dict]:
+        results = await self.get_detail_transactions(signatures)
+        write_data_to_json_file(results, 'for_mint.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        return [tx for parsed_transactions in results for tx in parsed_transactions if await self.validate_tx_via_mint(tx, mint)]
+
+    async def validate_tx_via_mint(self, tx: dict, mint: str) -> bool:
         if tx.get("transactionError"):
             return False
-        if not self.is_pumpfun_swap(tx):
+        if not await self.is_pumpfun_swap(tx):
             return False
         if not [
             tt for tt in tx['tokenTransfers']
@@ -128,7 +143,19 @@ class HeliusAPI:
             return False
         return True
 
-    def is_pumpfun_swap(self, tx: dict) -> bool:
+    async def validate_tx_via_program_id(self, tx: dict, mint: str) -> bool:
+        if tx.get("transactionError"):
+            return False
+        if not await self.is_token_create_instruction(tx):
+            return False
+        if not [
+            tt for tt in tx['tokenTransfers']
+            if not tt.get('fromUserAccount') and not tt.get('fromTokenAccount')
+        ]:
+            return False
+        return True
+
+    async def is_pumpfun_swap(self, tx: dict) -> bool:
         for instruction in tx.get("instructions", []):
             if instruction.get("programId") == settings.PUMP_FUN_PROGRAM_ID:
                 return True
@@ -136,3 +163,53 @@ class HeliusAPI:
                 if inner.get("programId") == settings.PUMP_FUN_PROGRAM_ID:
                     return True
         return False
+
+    async def is_token_create_instruction(self, tx: dict) -> bool:
+        for instruction in tx.get("instructions", []):
+            if instruction.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
+                logger.warning('Token is created')
+                return True
+            for inner in instruction.get("innerInstructions", []):
+                if inner.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
+                    logger.warning('Token is created')
+                    return True
+        logger.warning('Token is not created')
+        return False
+
+    async def fetch_finalized_signatures_by_account(
+            self, account_address, api_key, before=None, until=None, limit=None
+    ) -> list[str]:
+        results = []
+        while True:
+            params = [account_address]
+            options = {}
+            if before:
+                options['before'] = before
+            if until:
+                options['until'] = until
+            if limit:
+                options['limit'] = limit
+            if options:
+                params.append(options)
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    f"https://mainnet.helius-rpc.com/?api-key={api_key}",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": "1",
+                        "method": "getSignaturesForAddress",
+                        "params": params
+                    }
+                )
+            if not (data := res.json().get('result', [])):
+                break
+            logger.info(f'Data: {data}')
+            before = data[-1]['signature']
+            results.extend(
+                [s['signature'] for s in data if s['confirmationStatus'] == 'finalized']
+            )
+            logger.info(f'Results: {results}')
+        if not results:
+            logger.warning(f'No transactions found for: {account_address}')
+        return results

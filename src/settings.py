@@ -6,7 +6,7 @@ class Settings:
     MIN_SOL_AMOUNT = 0.01
     TARGET_MINT = '3Qr5bfs13ktHcoSHM1GLeYvsHk6WHoy23PRL44bxpump'
     SLOT_DURATION = 0.4
-    START_DATETIME = '2025-01-11 00:00:00'
-    END_DATETIME = '2025-01-12 00:00:00'
+    START_DATETIME = '2025-01-12 00:00:06'
+    END_DATETIME = '2025-01-12 00:00:10'
 
 settings = Settings()
