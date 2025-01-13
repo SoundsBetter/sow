@@ -9,7 +9,7 @@ from solana.rpc.core import RPCException
 from solders.pubkey import Pubkey
 from solders.rpc.responses import GetBlockResp
 from solders.signature import Signature
-from solders.transaction_status import TransactionConfirmationStatus, UiConfirmedBlock
+from solders.transaction_status import TransactionConfirmationStatus
 
 from src.utils import chunked_iterable, write_data_to_json_file
 from src.settings import settings
@@ -92,7 +92,6 @@ class HeliusAPI:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.transactions_endpoint = "https://mainnet.helius-rpc.com/?api-key={api_key}"
-        self.delay_before_request = 1
 
     async def get_transactions_for_chunk(self, chunk: list[str]):
         payload = {
@@ -120,7 +119,7 @@ class HeliusAPI:
 
     async def get_detail_transactions_created_token_pumpfun(self, signatures: list[str]) -> list[dict]:
         results = await self.get_detail_transactions(signatures)
-        write_data_to_json_file(results, 'for_account.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        await write_data_to_json_file(results, 'raw_txs_for_account.json')  # IF YOU NEED STORE RAW DATA TO FILE
         return [
             tx for parsed_transactions in results
             for tx in parsed_transactions if await self.validate_tx_via_program_id(tx, settings.TOKEN_CREATE_PROGRAM_ID)
@@ -128,7 +127,7 @@ class HeliusAPI:
 
     async def get_detail_transactions_for_mint(self, signatures: list[str], mint: str) -> list[dict]:
         results = await self.get_detail_transactions(signatures)
-        write_data_to_json_file(results, 'for_mint.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        await write_data_to_json_file(results, 'raw_txs_for_mint.json')  # IF YOU NEED STORE RAW DATA TO FILE
         return [tx for parsed_transactions in results for tx in parsed_transactions if await self.validate_tx_via_mint(tx, mint)]
 
     async def validate_tx_via_mint(self, tx: dict, mint: str) -> bool:
@@ -169,19 +168,18 @@ class HeliusAPI:
     async def is_token_create_instruction(self, tx: dict) -> bool:
         for instruction in tx.get("instructions", []):
             if instruction.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
-                logger.warning('Token is created')
                 return True
             for inner in instruction.get("innerInstructions", []):
                 if inner.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
-                    logger.warning('Token is created')
                     return True
-        logger.warning('Token is not created')
         return False
 
     async def fetch_finalized_signatures_by_account(
-            self, account_address, api_key, before=None, until=None, limit=None
+            self, account_address, before=None, until=None, limit=None
     ) -> list[str]:
         results = []
+        before = str(before) if before else before
+        until = str(until) if until else until
         while True:
             params = [account_address]
             options = {}
@@ -195,7 +193,7 @@ class HeliusAPI:
                 params.append(options)
             async with httpx.AsyncClient() as client:
                 res = await client.post(
-                    f"https://mainnet.helius-rpc.com/?api-key={api_key}",
+                    f"https://mainnet.helius-rpc.com/?api-key={self.api_key}",
                     headers={"Content-Type": "application/json"},
                     json={
                         "jsonrpc": "2.0",
@@ -206,12 +204,12 @@ class HeliusAPI:
                 )
             if not (data := res.json().get('result', [])):
                 break
-            logger.info(f'Data: {data}')
+
             before = data[-1]['signature']
             results.extend(
                 [s['signature'] for s in data if s['confirmationStatus'] == 'finalized']
             )
-            logger.info(f'Results: {results}')
+
         if not results:
             logger.warning(f'No transactions found for: {account_address}')
         return results

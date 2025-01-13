@@ -20,8 +20,8 @@ class TransactionParser:
                and swap.sol_amount and swap.sol_amount > settings.MIN_SOL_AMOUNT
         ]
 
-    def convert_to_minted_token(self, transactions: list[dict]) -> list[MintedToken]:
-        return [self.create_minted_token_from_transaction(tx) for tx in transactions]
+    async def convert_to_minted_token(self, transactions: list[dict]) -> list[MintedToken]:
+        return [await self.create_minted_token_from_transaction(tx) for tx in transactions]
 
     def create_swap_event_from_transaction(self, tx: dict) -> Optional[SwapEvent]:
         fee_payer = tx['feePayer']
@@ -49,7 +49,7 @@ class TransactionParser:
             timestamp=timestamp
         )
 
-    def create_minted_token_from_transaction(self, tx: dict) -> Optional[MintedToken]:
+    async def create_minted_token_from_transaction(self, tx: dict) -> Optional[MintedToken]:
         mint = [
             tt['mint'] for tt in tx['tokenTransfers'] if not tt['fromUserAccount'] and not tt['fromTokenAccount']
         ][0]
