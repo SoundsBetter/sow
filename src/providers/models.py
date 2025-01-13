@@ -10,3 +10,9 @@ class SwapEvent:
     token_amount: float
     is_buy: bool
     timestamp: str
+
+
+@dataclass
+class MintedToken:
+    mint: str
+    txh: str
