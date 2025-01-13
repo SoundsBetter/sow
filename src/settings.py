@@ -7,6 +7,6 @@ class Settings:
     TARGET_MINT = '3Qr5bfs13ktHcoSHM1GLeYvsHk6WHoy23PRL44bxpump'
     SLOT_DURATION = 0.4
     START_DATETIME = '2025-01-12 00:00:06'
-    END_DATETIME = '2025-01-12 00:00:10'
+    END_DATETIME = '2025-01-12 00:01:10'
 
 settings = Settings()

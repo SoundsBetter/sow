@@ -4,7 +4,7 @@ import logging
 
 from src.settings import settings
 from src.providers.api import SolanaAPI, HeliusAPI
-from src.providers.parser import SwapParser
+from src.providers.parser import TransactionParser
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 async def fetch_pumpfun_swaps_via_mint():
     solana_api = SolanaAPI(settings.RPC_URL)
     helius_api = HeliusAPI(settings.HELIUS_API_KEY)
-    parser = SwapParser(settings.TARGET_MINT)
+    parser = TransactionParser(settings.TARGET_MINT)
 
     signatures = await solana_api.fetch_finalized_signatures_by_account(settings.TARGET_MINT)
 

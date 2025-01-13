@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from src.settings import settings
-from src.providers.models import SwapEvent
+from src.providers.models import SwapEvent, MintedToken
 from src.utils import find_native_balance_change
 
 logger = logging.getLogger(__name__)
 
-class SwapParser:
-    def __init__(self, mint: str):
+class TransactionParser:
+    def __init__(self, mint: str = settings.TARGET_MINT):
         self.mint = mint
 
     def convert_to_swap_events(self, transactions: list[dict]) -> list[SwapEvent]:
@@ -19,6 +19,9 @@ class SwapParser:
             if (swap := self.create_swap_event_from_transaction(tx))
                and swap.sol_amount and swap.sol_amount > settings.MIN_SOL_AMOUNT
         ]
+
+    def convert_to_minted_token(self, transactions: list[dict]) -> list[MintedToken]:
+        return [self.create_minted_token_from_transaction(tx) for tx in transactions]
 
     def create_swap_event_from_transaction(self, tx: dict) -> Optional[SwapEvent]:
         fee_payer = tx['feePayer']
@@ -45,3 +48,10 @@ class SwapParser:
             is_buy=is_buy,
             timestamp=timestamp
         )
+
+    def create_minted_token_from_transaction(self, tx: dict) -> Optional[MintedToken]:
+        mint = [
+            tt['mint'] for tt in tx['tokenTransfers'] if not tt['fromUserAccount'] and not tt['fromTokenAccount']
+        ][0]
+        txh = tx['signature']
+        return MintedToken(mint, txh)

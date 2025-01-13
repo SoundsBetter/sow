@@ -148,6 +148,8 @@ class HeliusAPI:
             return False
         if not await self.is_token_create_instruction(tx):
             return False
+        if tx.get('type') != 'CREATE':
+            return False
         if not [
             tt for tt in tx['tokenTransfers']
             if not tt.get('fromUserAccount') and not tt.get('fromTokenAccount')
