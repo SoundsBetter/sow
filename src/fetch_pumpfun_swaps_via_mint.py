@@ -15,7 +15,8 @@ async def fetch_pumpfun_swaps_via_mint():
     helius_api = HeliusAPI(settings.HELIUS_API_KEY)
     parser = TransactionParser(settings.TARGET_MINT)
 
-    signatures = await solana_api.fetch_finalized_signatures_by_account(settings.TARGET_MINT)
+    async with solana_api:
+        signatures = await solana_api.fetch_finalized_signatures_by_account(settings.TARGET_MINT)
 
     detail_transactions = await helius_api.get_detail_transactions_for_mint(signatures, settings.TARGET_MINT)
     swap_events = parser.convert_to_swap_events(detail_transactions)
