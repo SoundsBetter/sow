@@ -1,4 +1,5 @@
 import asyncio
+from aiolimiter import AsyncLimiter
 import logging
 from typing import Optional
 
@@ -92,15 +93,23 @@ class HeliusAPI:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.transactions_endpoint = "https://mainnet.helius-rpc.com/?api-key={api_key}"
+        self.client = httpx.AsyncClient()
+        self.limiter = AsyncLimiter(10, 1)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.client.aclose()
 
     async def get_transactions_for_chunk(self, chunk: list[str]):
         payload = {
             "transactions": chunk
         }
-        async with httpx.AsyncClient() as client:
-            while True:
+        while True:
+            async with self.limiter:
                 try:
-                    res = await client.post(f"https://api.helius.xyz/v0/transactions?api-key={self.api_key}", json=payload)
+                    res = await self.client.post(f"https://api.helius.xyz/v0/transactions?api-key={self.api_key}", json=payload)
                 except Exception as e:
                     logger.error(f'Error while parsing transactions: {e}')
                     await asyncio.sleep(3)
@@ -112,22 +121,27 @@ class HeliusAPI:
                 return res.json()
 
     async def get_detail_transactions(self, signatures: list[str]) -> list[dict]:
-        return [
-            await self.get_transactions_for_chunk(chunk)
-            for chunk in chunked_iterable(signatures)
-        ]
+        tasks = [asyncio.create_task(self.get_transactions_for_chunk(chunk)) for chunk in chunked_iterable(signatures)]
+        results = []
+        for task in asyncio.as_completed(tasks):
+            try:
+                result = await task
+                results.extend(result)
+            except Exception as e:
+                logger.error(f'Error processing chunk: {e}')
+        return results
 
     async def get_detail_transactions_created_token_pumpfun(self, signatures: list[str]) -> list[dict]:
         results = await self.get_detail_transactions(signatures)
-        await write_data_to_json_file(results, 'raw_txs_for_account.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        # await write_data_to_json_file(results, 'raw_txs_for_account.json')  # IF YOU NEED STORE RAW DATA TO FILE
         return [
-            tx for parsed_transactions in results
-            for tx in parsed_transactions if await self.validate_tx_via_program_id(tx, settings.TOKEN_CREATE_PROGRAM_ID)
+            tx for tx in results
+            if await self.validate_tx_via_program_id(tx)
         ]
 
     async def get_detail_transactions_for_mint(self, signatures: list[str], mint: str) -> list[dict]:
         results = await self.get_detail_transactions(signatures)
-        await write_data_to_json_file(results, 'raw_txs_for_mint.json')  # IF YOU NEED STORE RAW DATA TO FILE
+        # await write_data_to_json_file(results, 'raw_txs_for_mint.json')  # IF YOU NEED STORE RAW DATA TO FILE
         return [tx for parsed_transactions in results for tx in parsed_transactions if await self.validate_tx_via_mint(tx, mint)]
 
     async def validate_tx_via_mint(self, tx: dict, mint: str) -> bool:
@@ -142,10 +156,8 @@ class HeliusAPI:
             return False
         return True
 
-    async def validate_tx_via_program_id(self, tx: dict, mint: str) -> bool:
+    async def validate_tx_via_program_id(self, tx: dict) -> bool:
         if tx.get("transactionError"):
-            return False
-        if not await self.is_token_create_instruction(tx):
             return False
         if tx.get('type') != 'CREATE':
             return False
@@ -162,15 +174,6 @@ class HeliusAPI:
                 return True
             for inner in instruction.get("innerInstructions", []):
                 if inner.get("programId") == settings.PUMP_FUN_PROGRAM_ID:
-                    return True
-        return False
-
-    async def is_token_create_instruction(self, tx: dict) -> bool:
-        for instruction in tx.get("instructions", []):
-            if instruction.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
-                return True
-            for inner in instruction.get("innerInstructions", []):
-                if inner.get("programId") == settings.TOKEN_CREATE_PROGRAM_ID:
                     return True
         return False
 
